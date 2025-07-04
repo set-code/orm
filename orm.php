@@ -10,6 +10,10 @@ class ORM
     protected static $pdo; // Экземпляр PDO для работы с базой данных
     protected static $table; // Имя таблицы, с которой работает ORM
 
+    // Новые свойства для поддержки WHERE/ORDER BY/LIMIT
+    protected $wheres = [];
+    protected $orders = [];
+    protected $limit;
 
     /**
      * ORM constructor.
@@ -20,7 +24,6 @@ class ORM
     {
         self::$table = $table;
     }
-
 
     /**
      * Устанавливает подключение к базе данных с использованием предоставленных параметров.
@@ -43,7 +46,6 @@ class ORM
         }
     }
 
-
     /**
      * Проверяет, существует ли таблица в базе данных.
      *
@@ -64,7 +66,6 @@ class ORM
         return $result !== false;
     }
 
-
     /**
      * Создаёт новую таблицу в базе данных на основе предоставленных данных.
      *
@@ -84,12 +85,10 @@ class ORM
             $type = $this->determineColumnType($value);
             $columns[] = "$column $type";
         }
-
         $columnsSql = implode(", ", $columns);
         $sql = "CREATE TABLE $table (id INT AUTO_INCREMENT PRIMARY KEY, $columnsSql)";
         self::$pdo->exec($sql);
     }
-
 
     /**
      * Добавляет отсутствующие колонки в существующую таблицу.
@@ -111,7 +110,6 @@ class ORM
         }
     }
 
-
     /**
      * Изменяет тип колонки, если это необходимо.
      *
@@ -123,13 +121,11 @@ class ORM
     {
         $currentType = $this->getColumnType($table, $column);
         $newType = $this->determineColumnType($value);
-
         // Проверяем, различаются ли типы, и изменяем при необходимости
         if ($currentType !== $newType) {
             self::$pdo->exec("ALTER TABLE `$table` MODIFY `$column` $newType");
         }
     }
-
 
     /**
      * Получает тип колонки из таблицы.
@@ -143,7 +139,6 @@ class ORM
         $result = self::$pdo->query("SHOW COLUMNS FROM `$table` LIKE '$column'")->fetch();
         return $result ? $result['Type'] : null;
     }
-
 
     /**
      * Определяет тип колонки на основе значения.
@@ -166,11 +161,8 @@ class ORM
         } elseif (is_array($value)) {
             return 'TEXT';
         }
-
         return 'TEXT';
     }
-
-
 
     /**
      * Обрабатывает данные перед записью в базу данных.
@@ -193,7 +185,6 @@ class ORM
         return $processedData;
     }
 
-
     /**
      * Добавляет новую запись в таблицу базы данных.
      *
@@ -213,26 +204,19 @@ class ORM
         } else {
             $this->addMissingColumns(self::$table, $data);
         }
-
         $processedData = $this->preprocessData($data);
-
         $columns = implode(", ", array_keys($processedData));
         $placeholders = ":" . implode(", :", array_keys($processedData));
-
         $sql = "INSERT INTO " . self::$table . " ($columns) VALUES ($placeholders)";
         $stmt = self::$pdo->prepare($sql);
         foreach ($processedData as $key => &$value) {
             $stmt->bindParam(":$key", $value);
         }
-
         if (!$stmt->execute()) {
             throw new Exception("Ошибка создания записи: " . implode(", ", $stmt->errorInfo()));
         }
-
         return true;
     }
-
-
 
     /**
      * Обновляет запись в таблице по заданному ID с переданными данными.
@@ -253,37 +237,30 @@ class ORM
         $stmt = self::$pdo->prepare($sql);
         $stmt->bindParam(":id", $id);
         $stmt->execute();
-
         if ($stmt->rowCount() === 0) {
             throw new Exception("Запись с ID $id не найдена.");
         }
-
         $processedData = $this->preprocessData($data);
         foreach ($processedData as $key => $value) {
             // Изменяем тип колонки при необходимости
             $this->changeColumnTypeIfNeeded(self::$table, $key, $value);
         }
-
         $setClause = [];
         foreach ($processedData as $key => $value) {
             $setClause[] = "$key = :$key";
         }
         $setClause = implode(", ", $setClause);
-
         $sql = "UPDATE " . self::$table . " SET $setClause WHERE id = :id";
         $stmt = self::$pdo->prepare($sql);
         foreach ($processedData as $key => &$value) {
             $stmt->bindParam(":$key", $value);
         }
         $stmt->bindParam(":id", $id);
-
         if (!$stmt->execute()) {
             throw new Exception("Ошибка обновления записи: " . implode(", ", $stmt->errorInfo()));
         }
-
         return true;
     }
-
 
     /**
      * Обновляет все записи в таблице с переданными данными.
@@ -302,10 +279,8 @@ class ORM
         if (empty($data)) {
             throw new Exception("Нет данных для обновления.");
         }
-
         // Предварительная обработка данных
         $processedData = $this->preprocessData($data);
-
         // Формируем часть запроса SET
         $setClause = [];
         foreach ($processedData as $key => $value) {
@@ -314,26 +289,20 @@ class ORM
             $setClause[] = "$key = :$key";
         }
         $setClause = implode(", ", $setClause);
-
         // Строим и подготавливаем SQL-запрос для обновления всех записей
         $sql = "UPDATE " . self::$table . " SET $setClause";
         $stmt = self::$pdo->prepare($sql);
-
         // Привязываем параметры
         foreach ($processedData as $key => &$value) {
             $stmt->bindParam(":$key", $value);
         }
-
         // Выполняем запрос
         if (!$stmt->execute()) {
             throw new Exception("Ошибка обновления записей: " . implode(", ", $stmt->errorInfo()));
         }
-
         // Возвращаем количество обновленных строк
         return $stmt->rowCount();
     }
-
-
 
     /**
      * Обновляет все записи в таблице, где указанные поля пустые.
@@ -354,7 +323,6 @@ class ORM
         if (empty($data)) {
             throw new Exception("Нет данных для обновления.");
         }
-
         // Формируем часть запроса SET
         $processedData = $this->preprocessData($data);
         $setClause = [];
@@ -364,7 +332,6 @@ class ORM
             $setClause[] = "$key = :$key";
         }
         $setClause = implode(", ", $setClause);
-
         // Формируем часть запроса WHERE
         $whereClause = [];
         foreach ($conditions as $key => $value) {
@@ -376,27 +343,20 @@ class ORM
             }
         }
         $whereClause = implode(" OR ", $whereClause);
-
         // Строим и подготавливаем SQL-запрос для обновления по условиям
         $sql = "UPDATE " . self::$table . " SET $setClause WHERE $whereClause";
         $stmt = self::$pdo->prepare($sql);
-
         // Привязываем параметры
         foreach ($processedData as $key => &$value) {
             $stmt->bindParam(":$key", $value);
         }
-
         // Выполняем запрос
         if (!$stmt->execute()) {
             throw new Exception("Ошибка обновления записей: " . implode(", ", $stmt->errorInfo()));
         }
-
         // Возвращаем количество обновленных строк
         return $stmt->rowCount();
     }
-
-
-
 
     /**
      * Обновляет записи в таблице, которые соответствуют заданным условиям.
@@ -417,7 +377,6 @@ class ORM
         if (empty($data)) {
             throw new Exception("Нет данных для обновления.");
         }
-
         // Формируем часть запроса SET
         $processedData = $this->preprocessData($data);
         $setClause = [];
@@ -427,38 +386,30 @@ class ORM
             $setClause[] = "$key = :$key";
         }
         $setClause = implode(", ", $setClause);
-
         // Формируем часть запроса WHERE
         $whereClause = [];
         foreach ($conditions as $key => $value) {
             $whereClause[] = "$key = :cond_$key";
         }
         $whereClause = implode(" AND ", $whereClause);
-
         // Строим и подготавливаем SQL-запрос для обновления по условиям
         $sql = "UPDATE " . self::$table . " SET $setClause WHERE $whereClause";
         $stmt = self::$pdo->prepare($sql);
-
         // Привязываем параметры для обновления
         foreach ($processedData as $key => &$value) {
             $stmt->bindParam(":$key", $value);
         }
-
         // Привязываем параметры для условий
         foreach ($conditions as $key => &$value) {
             $stmt->bindParam(":cond_$key", $value);
         }
-
         // Выполняем запрос
         if (!$stmt->execute()) {
             throw new Exception("Ошибка обновления записей: " . implode(", ", $stmt->errorInfo()));
         }
-
         // Возвращаем количество обновленных строк
         return $stmt->rowCount();
     }
-
-
 
     /**
      * Находит записи в таблице по указанному столбцу и значению с возможностью исключения определённых полей.
@@ -478,7 +429,6 @@ class ORM
         if (empty($column)) {
             throw new Exception("Имя столбца не может быть пустым.");
         }
-
         // Формируем список полей для выборки
         $fields = '*'; // По умолчанию выбираем все поля
         if (!empty($excludeFields)) {
@@ -486,19 +436,15 @@ class ORM
             $fieldsArray = array_diff($allFields, $excludeFields); // Исключаем ненужные поля
             $fields = implode(", ", $fieldsArray); // Формируем строку с оставшимися полями
         }
-
         // Формируем SQL-запрос для поиска
         $sql = "SELECT $fields FROM " . self::$table . " WHERE $column = :value";
         $stmt = self::$pdo->prepare($sql);
-
         // Привязываем параметр
         $stmt->bindParam(':value', $value);
-
         // Выполняем запрос
         if (!$stmt->execute()) {
             throw new Exception("Ошибка выполнения запроса: " . implode(", ", $stmt->errorInfo()));
         }
-
         // Возвращаем массив найденных записей
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
@@ -517,8 +463,6 @@ class ORM
         return $columns;
     }
 
-
-
     /**
      * Находит запись в таблице по заданному ID.
      *
@@ -536,14 +480,11 @@ class ORM
         $stmt = self::$pdo->prepare($sql);
         $stmt->bindParam(":id", $id);
         $stmt->execute();
-
         if ($stmt->rowCount() === 0) {
             throw new Exception("Запись с ID $id не найдена.");
         }
-
         return $stmt->fetch(PDO::FETCH_ASSOC);
     }
-
 
     /**
      * Получает все записи из таблицы.
@@ -560,7 +501,6 @@ class ORM
         $stmt = self::$pdo->query($sql);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
-
 
     /**
      * Выполняет произвольный SQL-запрос с переданными параметрами.
@@ -581,9 +521,7 @@ class ORM
                 // Привязываем параметры к запросу
                 $stmt->bindParam(":$key", $value);
             }
-
             $stmt->execute(); // Выполняем запрос
-
             // Определяем тип запроса
             if (stripos(trim($sql), 'SELECT') === 0) {
                 // Если это SELECT-запрос, возвращаем результат в виде массива
@@ -596,7 +534,6 @@ class ORM
             throw new Exception("Ошибка выполнения запроса: " . $e->getMessage());
         }
     }
-
 
     /**
      * Удаляет запись из таблицы по заданному ID.
@@ -616,19 +553,193 @@ class ORM
         $stmt = self::$pdo->prepare($sql);
         $stmt->bindParam(":id", $id);
         $stmt->execute();
-
         if ($stmt->rowCount() === 0) {
             throw new Exception("Запись с ID $id не найдена.");
         }
-
         $sql = "DELETE FROM " . self::$table . " WHERE id = :id";
         $stmt = self::$pdo->prepare($sql);
         $stmt->bindParam(":id", $id);
-
         if (!$stmt->execute()) {
             throw new Exception("Ошибка удаления записи: " . implode(", ", $stmt->errorInfo()));
         }
-
         return true;
+    }
+
+    // ========== НОВЫЕ МЕТОДЫ РАСШИРЕННОЙ ФИЛЬТРАЦИИ ==========
+
+    /**
+     * Добавляет условие WHERE в запрос.
+     *
+     * @param string $column Имя столбца.
+     * @param string $operator Оператор сравнения (например, '=', '>', '<', 'LIKE').
+     * @param mixed $value Значение для сравнения.
+     * @return $this
+     */
+    public function where($column, $operator, $value = null)
+    {
+        if (func_num_args() == 2) {
+            $value = $operator;
+            $operator = '=';
+        }
+
+        $this->wheres[] = [
+            'type' => 'AND',
+            'column' => $column,
+            'operator' => $operator,
+            'value' => $value
+        ];
+
+        return $this;
+    }
+
+    /**
+     * Добавляет условие OR WHERE в запрос.
+     *
+     * @param string $column Имя столбца.
+     * @param string $operator Оператор сравнения.
+     * @param mixed $value Значение для сравнения.
+     * @return $this
+     */
+    public function orWhere($column, $operator, $value = null)
+    {
+        if (func_num_args() == 2) {
+            $value = $operator;
+            $operator = '=';
+        }
+
+        $this->wheres[] = [
+            'type' => 'OR',
+            'column' => $column,
+            'operator' => $operator,
+            'value' => $value
+        ];
+
+        return $this;
+    }
+
+    /**
+     * Добавляет сортировку по указанному столбцу.
+     *
+     * @param string $column Имя столбца.
+     * @param string $direction Направление сортировки (ASC или DESC).
+     * @return $this
+     */
+    public function orderBy($column, $direction = 'ASC')
+    {
+        $this->orders[] = [
+            'column' => $column,
+            'direction' => strtoupper($direction)
+        ];
+
+        return $this;
+    }
+
+    /**
+     * Устанавливает ограничение на количество возвращаемых записей.
+     *
+     * @param int $limit Количество записей.
+     * @return $this
+     */
+    public function limit($limit)
+    {
+        $this->limit = $limit;
+
+        return $this;
+    }
+
+    /**
+     * Строит часть WHERE SQL-запроса.
+     *
+     * @param array $params Массив параметров для bindValue.
+     * @return string Часть SQL-запроса WHERE.
+     */
+    protected function buildWhereClause(&$params)
+    {
+        $whereSql = '';
+        if (!empty($this->wheres)) {
+            $clauses = [];
+            foreach ($this->wheres as $index => $where) {
+                $paramKey = "where_$index";
+                $clauses[] = ($index > 0 ? strtoupper($where['type']) . ' ' : '') .
+                    "`{$where['column']}` {$where['operator']} :$paramKey";
+                $params[$paramKey] = $where['value'];
+            }
+            $whereSql = ' WHERE ' . implode(' ', $clauses);
+        }
+        return $whereSql;
+    }
+
+    /**
+     * Строит часть ORDER BY SQL-запроса.
+     *
+     * @return string Часть SQL-запроса ORDER BY.
+     */
+    protected function buildOrderClause()
+    {
+        $orderSql = '';
+        if (!empty($this->orders)) {
+            $clauses = [];
+            foreach ($this->orders as $order) {
+                $clauses[] = "`{$order['column']}` {$order['direction']}";
+            }
+            $orderSql = ' ORDER BY ' . implode(', ', $clauses);
+        }
+        return $orderSql;
+    }
+
+    /**
+     * Строит часть LIMIT SQL-запроса.
+     *
+     * @return string Часть SQL-запроса LIMIT.
+     */
+    protected function buildLimitClause()
+    {
+        return $this->limit ? " LIMIT {$this->limit}" : "";
+    }
+
+    /**
+     * Сбрасывает текущее состояние запроса.
+     */
+    protected function resetQuery()
+    {
+        $this->wheres = [];
+        $this->orders = [];
+        $this->limit = null;
+    }
+
+    /**
+     * Выполняет SQL-запрос и возвращает результат.
+     *
+     * @return array Результат запроса в виде массива.
+     * @throws Exception Если запрос завершился с ошибкой.
+     */
+    public function get()
+    {
+        $params = [];
+
+        // Формируем SQL
+        $sql = "SELECT * FROM `" . self::$table . "`";
+        $sql .= $this->buildWhereClause($params);
+        $sql .= $this->buildOrderClause();
+        $sql .= $this->buildLimitClause();
+
+        // Выполняем запрос
+        try {
+            $stmt = self::$pdo->prepare($sql);
+
+            foreach ($params as $key => $value) {
+                $stmt->bindValue(":$key", $value);
+            }
+
+            $stmt->execute();
+            $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // Сброс состояния для повторного использования
+            $this->resetQuery();
+
+            return $results;
+        } catch (PDOException $e) {
+            throw new Exception("Ошибка выполнения запроса: " . $e->getMessage());
+        }
     }
 }
